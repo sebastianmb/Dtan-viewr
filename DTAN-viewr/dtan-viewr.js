@@ -1,39 +1,43 @@
-/**
- * Function to mask clouds using the Sentinel-2 QA band
- * @param {ee.Image} image Sentinel-2 image
- * @return {ee.Image} cloud masked Sentinel-2 image
- */
- function maskS2clouds(image) {
-    var qa = image.select('QA60');
-  
-    // Bits 10 and 11 are clouds and cirrus, respectively.
-    var cloudBitMask = 1 << 10;
-    var cirrusBitMask = 1 << 11;
-  
-    // Both flags should be set to zero, indicating clear conditions.
-    var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
-        .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
-  
-    return image.updateMask(mask).divide(10000);
-  }
-  
-  var dataset = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                    .filterDate('2022-08-01', '2022-10-29')
-                    // Pre-filter to get less cloudy granules.
-                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',20))
-                    .map(maskS2clouds);
-  var median = dataset.mean();
-  
-  var clipped = median.clipToCollection(table);
-  
-  
-  var visualization = {
-    min: 0.0,
-    max: 0.3,
-    bands: ['B4', 'B3', 'B2'],
-  };
-  
-  Map.setCenter(-73, 7.5, 7);
-  
-  Map.addLayer(clipped, visualization, 'RGB');
-  
+//------------------------------LÍMITES DTAN---------------------------------------------------------//
+//Límites de cada AP de la DTAN
+
+var Limite = ee.FeatureCollection(table);
+
+
+//Centrar capa (El valor 9 hace referencia al zoom)
+Map.centerObject(Limite,9);
+
+
+//------------------COLECCIÓN DE DATOS----------------------//
+var Landsat_8_t0  = ee.ImageCollection ("LC8_L1T"); //Disponibilidad, entre 2013-presente
+var Landsat_8_t1  = ee.ImageCollection ("LC8_L1T"); //Disponibilidad, entre 2013-presente
+
+//Filtrar la collecció. Primero por fecha, segundo por el límite de estudio y tercero por porncentaje de nubosidad
+var Filtro_L8t0 = Landsat_8_t0.filterDate    ('2022-09-01', '2022-09-30')
+                         .filterBounds  (Limite)
+                         .filterMetadata('CLOUD_COVER', 'less_than', 50);
+var Filtro_L8t1 = Landsat_8_t1.filterDate    ('2022-09-30', '2022-10-29')
+                         .filterBounds  (Limite)
+                         .filterMetadata('CLOUD_COVER', 'less_than', 50);
+
+/*Aplicación de algoritmo para construcción de mosaicos 
+eligiendo los pixeles con valores concentrados al percentil 50,
+con un porcentaje de nubosidad del pixel de 10 y que elija 50 imagenes para construirlo */
+var mt0_L8 = ee.Algorithms.Landsat.simpleComposite(Filtro_L8t0, 50, 10, 50);  
+var mt1_L8 = ee.Algorithms.Landsat.simpleComposite(Filtro_L8t1, 50, 10, 50);
+
+//Cortar los mosaicos con el límite del área de estudio
+var corte_mosaicot0 = mt0_L8.clip(Limite);
+var corte_mosaicot1 = mt1_L8.clip(Limite);
+
+//Nombrar las bandas de los sensores para luego renombrarlas en cada uno de ellos
+var nombres_bandas = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7' ];
+
+//Función para luego aplicarla a cada uno de los mosaicos de acuerdo al sensor con el que se construyó
+var L8t0 = function(image) {return image.select(['B2','B3','B4', 'B5', 'B6', 'B7','B8' ], nombres_bandas)};
+var L8t1 = function(image) {return image.select(['B2','B3','B4', 'B5', 'B6', 'B7','B8' ], nombres_bandas)};
+
+/*Aplicación de funciones para normalizar los nombres de las bandas,
+es decir, selecciona las que debe y les reasigna nombres iguales para las 2 colecciones*/
+var Mosaico_1 = L8t0(corte_mosaicot0);
+var Mosaico_2 = L8t1(corte_mosaicot1);
